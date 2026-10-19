@@ -148,7 +148,7 @@ button:focus-visible{outline:3px solid var(--pink);outline-offset:3px}
     <div class="stats"><div class="chip">최고 기록 <b id="sBest">0</b>m</div><div class="chip"><i class="coin"></i><b id="sCoins">0</b></div></div>
     <button id="btnPlay" class="btn big">달리기 시작</button>
     <button id="btnShop" class="btn second">펭귄 꾸미기</button>
-    <p class="hint">옆으로 쓸면 줄 바꾸기, 톡 누르면 점프</p>
+    <p class="hint">옆으로 쓸면 줄 바꾸기 · 톡 누르면 점프<br>아래로 쓸면 슬라이딩</p>
   </div>
   <button id="btnSound" class="icon-btn sound" aria-label="소리 끄기">🔊</button>
   <small class="credit">3D models made with Meshy AI (CC BY 4.0)</small>
@@ -393,11 +393,12 @@ const ITEMS=[
 const CATS=[['hat','모자'],['scarf','목도리'],['glasses','안경'],['color','몸 색깔']];
 
 const MONSTERS=[
-  {key:'seal',h:1.08,col:[1,1,1,1]},
-  {key:'bear',h:1.12,col:[1,1,1,1]},
-  {key:'puff',h:0.98,col:[1,1,1,1]},
-  {key:'snow',h:1.12,col:[0.74,1.0,0.84,1]}
+  {key:'seal',h:1.52,col:[1,1,1,1]},
+  {key:'bear',h:1.58,col:[1,1,1,1]},
+  {key:'puff',h:1.38,col:[1,1,1,1]},
+  {key:'snow',h:1.58,col:[0.74,1.0,0.84,1]}
 ];
+const ICE_Y=1.45, GAP_LEN=3.4, ARCH_CLEAR=1.05;
 
 async function loadAll(){
   const list=[['penguin','penguin'],['seal','monster_seal'],['bear','monster_bear'],['puff','monster_purple_puff'],['snow','monster_snowman'],
@@ -406,10 +407,10 @@ async function loadAll(){
   for(const [k,f] of list){raws[k]=await loadGLB(b64(MODEL_DATA[f]));done++;lb.style.width=(done/list.length*100)+'%';await new Promise(r=>setTimeout(r,0))}
   M.penguin=fitModel(raws.penguin,{h:1.15});
   for(const m of MONSTERS)M[m.key]=fitModel(raws[m.key],{h:m.h});
-  M.donut=fitModel(raws.donut,{h:0.92});
-  M.building=fitModel(raws.building,{w:1.42,h:1.75,d:1.3});
-  M.ice=fitModel(raws.ice,{w:0.95,h:0.82,d:0.8});
-  M.coin=fitModel(raws.coin,{h:0.5});
+  M.donut=fitModel(raws.donut,{h:1.26});
+  M.building=fitModel(raws.building,{w:2.05,h:2.7,d:1.6});
+  M.ice=fitModel(raws.ice,{w:1.18,h:1.02,d:0.98});
+  M.coin=fitModel(raws.coin,{h:0.62});
   PR={box:geo(gBox()),sph:geo(gSphere(24,16)),hemi:geo(gSphere(24,10,Math.PI/2)),cone:geo(gCyl(0,1,24,true)),cyl:geo(gCyl(1,1,28,true)),
     tube:geo(gCyl(1,1,32,false)),torus:geo(gTorus(.24,36,14)),plane:geo(gPlane()),heart:geo(gHeart()),bank:geo(gCyl(1,1,20,false))};
   computeAnchors();
@@ -462,26 +463,36 @@ function drawPenguin(B){draw(M.penguin.mesh,M4.mul(B,M.penguin.nm),bodyOpts());d
 
 /* ================= game state ================= */
 let state='loading',time=0,scroll=0;
-const pg={lane:1,x:0,y:0,vy:0,slip:0,inv:0,tilt:0,rot:0,queued:0,qT:0,dead:false,turn:0};
+const pg={lane:1,x:0,y:0,vy:0,slip:0,inv:0,tilt:0,rot:0,queued:0,qT:0,dead:false,turn:0,slide:0,fell:false};
 let speed=0,dist=0,runCoins=0,spawnAcc=0,obs=[],parts=[],bergs=[],shake=0,camBlend=0,overT=0,showRot=0,introT=0;
 const SPAWN_Z=-108;
 
 function resetRun(){
-  Object.assign(pg,{lane:1,x:0,y:0,vy:0,slip:0,inv:0,tilt:0,rot:0,queued:0,qT:0,dead:false,turn:camBlend>0.5?1:0});
+  Object.assign(pg,{lane:1,x:0,y:0,vy:0,slip:0,inv:0,tilt:0,rot:0,queued:0,qT:0,dead:false,turn:camBlend>0.5?1:0,slide:0,fell:false});
   speed=0;dist=0;runCoins=0;spawnAcc=0;obs=[];parts=[];shake=0;overT=0;introT=0;
   let z=-30;while(z>SPAWN_Z){spawnRow(z,true);z-=16}
 }
 function makeObs(type,lane,z,extra){
   const o={type,lane,x:LANES[lane],z,y:0,hit:false,dead:false,ph:Math.random()*6,vx:0,vy:0,spin:0,rx:0,rz:0,ry:0};
-  if(type==='mon'){o.m=extra;o.h=MONSTERS[extra].h*0.88;o.d=0.62}
-  else if(type==='donut'){o.h=0.8;o.d=0.45;o.roll=0}
+  if(type==='mon'){o.m=extra;o.h=MONSTERS[extra].h*0.72;o.d=0.78}
+  else if(type==='donut'){o.h=0.95;o.d=0.6;o.roll=0}
   else if(type==='building'){o.h=99;o.d=M.building.d}
-  else if(type==='ice'){o.h=M.ice.h;o.d=M.ice.d}
+  else if(type==='ice'){o.h=M.ice.h;o.d=M.ice.d;o.y=ICE_Y}
+  else if(type==='coin'){o.h=0.6;o.d=0.5}
+  else if(type==='arch'){o.h=99;o.d=0.36;o.x=0}
+  else if(type==='gap'){o.h=0;o.d=0;o.x=0;o.len=GAP_LEN}
   obs.push(o);return o;
 }
+function coinTrail(lane,z,n){for(let k=0;k<n;k++)makeObs('coin',lane,z-k*2.0)}
 function spawnRow(z,easy){
   const d=dist;let n=1;
-  if(!easy){if(d>600)n=Math.random()<.6?2:1;else if(d>150)n=Math.random()<.4?2:1}
+  if(!easy){
+    const k=Math.random();
+    // 끊긴 길: 코인을 구멍 위에 걸쳐 둬서 "여기서 점프" 신호를 준다
+    if(d>260&&k<0.15){makeObs('gap',1,z);const cl=Math.floor(Math.random()*3);for(let i=-1;i<=1;i++)makeObs('coin',cl,z+i*1.5);return}
+    // 슬라이딩 게이트
+    if(d>120&&k<0.32){makeObs('arch',1,z);coinTrail(Math.floor(Math.random()*3),z-1.0,4);return}
+    if(d>600)n=Math.random()<.6?2:1;else if(d>150)n=Math.random()<.4?2:1}
   const lanes=[0,1,2].sort(()=>Math.random()-.5);const used=lanes.slice(0,n),free=lanes.slice(n);
   for(const l of used){
     const r=Math.random();let t;
@@ -490,6 +501,7 @@ function spawnRow(z,easy){
     if(t==='mon')makeObs('mon',l,z,Math.floor(Math.random()*MONSTERS.length));else makeObs(t,l,z);
   }
   if(Math.random()<(easy?.5:.38)){const l=free[Math.floor(Math.random()*free.length)];makeObs('ice',l,z+(Math.random()<.5?0:-4))}
+  if(free.length&&Math.random()<.6){const l=free[Math.floor(Math.random()*free.length)];coinTrail(l,z-5,4+Math.floor(Math.random()*3))}
 }
 function initBergs(){bergs=[];for(let i=0;i<16;i++)bergs.push(newBerg(rnd(-130,10)))}
 function newBerg(z){const side=Math.random()<.5?-1:1;const big=Math.random()<.35;
@@ -502,14 +514,16 @@ function laneMove(dir){
   if(pg.slip>0){pg.queued=dir;pg.qT=0.18;return}
   pg.lane=clamp(pg.lane+dir,0,2);
 }
-function jump(){if(state!=='run'||pg.dead||pg.slip>0)return;if(pg.y<=0.001){pg.vy=7.7;SFX.jump()}}
+function jump(){if(state!=='run'||pg.dead||pg.slip>0)return;if(pg.y<=0.001){pg.vy=9.0;pg.slide=0;SFX.jump()}}
+function slide(){if(state!=='run'||pg.dead||pg.slip>0)return;pg.slide=0.62;if(pg.y>0.001)pg.vy=Math.min(pg.vy,-13);SFX.crack()}
 window.addEventListener('pointerdown',e=>{if(state!=='run'||e.target.closest('button'))return;tStart={x:e.clientX,y:e.clientY,fired:false}});
 window.addEventListener('pointermove',e=>{if(!tStart||tStart.fired)return;const dx=e.clientX-tStart.x,dy=e.clientY-tStart.y;
   if(Math.abs(dx)>26&&Math.abs(dx)>Math.abs(dy)){laneMove(dx>0?1:-1);tStart.fired=true}
-  else if(dy<-30&&Math.abs(dy)>Math.abs(dx)){jump();tStart.fired=true}});
+  else if(dy<-30&&Math.abs(dy)>Math.abs(dx)){jump();tStart.fired=true}
+  else if(dy>30&&Math.abs(dy)>Math.abs(dx)){slide();tStart.fired=true}});
 window.addEventListener('pointerup',e=>{if(!tStart)return;if(!tStart.fired)jump();tStart=null});
 window.addEventListener('pointercancel',()=>{tStart=null});
-window.addEventListener('keydown',e=>{if(state!=='run')return;if(e.key==='ArrowLeft')laneMove(-1);else if(e.key==='ArrowRight')laneMove(1);else if(e.key===' '||e.key==='ArrowUp'){jump();e.preventDefault()}});
+window.addEventListener('keydown',e=>{if(state!=='run')return;if(e.key==='ArrowLeft')laneMove(-1);else if(e.key==='ArrowRight')laneMove(1);else if(e.key===' '||e.key==='ArrowUp'){jump();e.preventDefault()}else if(e.key==='ArrowDown'){slide();e.preventDefault()}});
 
 /* ================= effects ================= */
 function burst(x,y,z,n,col,size,alpha){for(let i=0;i<n;i++)parts.push({k:'shard',x,y,z,vx:rnd(-3,3),vy:rnd(2,6),vz:rnd(-1,3),r:rnd(0,6),rv:rnd(-10,10),s:size*rnd(.6,1.2),life:rnd(.5,.9),t:0,col,alpha})}
@@ -519,11 +533,12 @@ function popText(t){const el=document.getElementById('pop');el.textContent=t;el.
 /* ================= update ================= */
 function update(dt){
   time+=dt;
+  if(shake>0)shake=Math.max(0,shake-dt*2.5);   // 모든 상태에서 감쇠 (over/start에서 멈춰 있던 버그)
   for(const b of bergs){b.z+=(state==='run'?speed:1.2)*dt;if(b.z>14)Object.assign(b,newBerg(rnd(-140,-120)))}
   scroll+=(state==='run'?speed:1.2)*dt;
   if(state==='start'||state==='shop'){camBlend=Math.max(0,camBlend-dt*2);showRot=state==='shop'?showRot+dt*0.9:lerp(showRot,0,1-Math.exp(-dt*6));return}
   if(state==='pause')return;
-  if(state==='over'){overT+=dt;pg.tilt=lerp(pg.tilt,Math.PI/2,1-Math.exp(-dt*8));pg.y=Math.max(0,pg.y+pg.vy*dt);pg.vy-=21*dt;
+  if(state==='over'){overT+=dt;pg.tilt=lerp(pg.tilt,Math.PI/2,1-Math.exp(-dt*8));const ny=pg.y+pg.vy*dt;pg.y=pg.fell?ny:Math.max(0,ny);pg.vy-=21*dt;
     stepParts(dt);for(const o of obs)if(o.hit)stepKnock(o,dt);return}
   // run
   introT+=dt;pg.turn=Math.min(1,pg.turn+dt/0.7);camBlend=Math.min(1,camBlend+dt*1.4);
@@ -535,7 +550,8 @@ function update(dt){
   pg.vy-=21*dt;pg.y+=pg.vy*dt;if(pg.y<=0){pg.y=0;pg.vy=0}
   if(pg.inv>0)pg.inv-=dt;
   if(pg.slip>0){pg.slip-=dt;if(pg.slip<=0){pg.slip=0;popText('다시 일어났다!')}}
-  pg.tilt=lerp(pg.tilt,pg.slip>0?Math.PI/2*0.92:0,1-Math.exp(-dt*10));
+  if(pg.slide>0)pg.slide-=dt;
+  pg.tilt=lerp(pg.tilt,pg.slip>0?Math.PI/2*0.92:(pg.slide>0?-1.15:0),1-Math.exp(-dt*12));
   // spawn
   spawnAcc+=speed*dt;const gap=speed*Math.max(.72,1.45-dist/1600);
   if(spawnAcc>=gap){spawnAcc=0;spawnRow(SPAWN_Z,false)}
@@ -545,35 +561,41 @@ function update(dt){
     o.z+=speed*dt+(o.type==='donut'?3*dt:0);
     if(o.type==='donut')o.roll+=dt*(speed+3)/0.46;
     if(o.z>12)o.dead=true;
-    if(Math.abs(o.z)<0.32+o.d/2&&Math.abs(o.x-pg.x)<0.72)collide(o);
+    if(o.type==='gap'){if(!pg.dead&&pg.y<=0.02&&Math.abs(o.z)<o.len/2-0.2)gapFall();continue}
+    if(Math.abs(o.z)<0.32+o.d/2&&(o.type==='arch'||Math.abs(o.x-pg.x)<0.72))collide(o);
   }
   obs=obs.filter(o=>!o.dead);
   stepParts(dt);
-  if(shake>0)shake=Math.max(0,shake-dt*2.5);
   hud();
 }
-function stepKnock(o,dt){if(o.type==='building'){o.z+=(state==='run'?speed:0)*dt;if(o.z>12)o.dead=true;return}o.vy-=18*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.z+=(state==='run'?speed:0)*dt+o.vz*dt;o.rx+=o.spin*dt;o.rz+=o.spin*.6*dt;if(o.y<-6||o.z>14)o.dead=true}
+function gapFall(){if(pg.dead)return;burst(pg.x,0.4,0,12,[0.8,0.92,1],0.12,.9);shake=0.6;gameOver(true)}
+function stepKnock(o,dt){if(o.type==='building'||o.type==='arch'){o.z+=(state==='run'?speed:0)*dt;if(o.z>12)o.dead=true;return}o.vy-=18*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.z+=(state==='run'?speed:0)*dt+o.vz*dt;o.rx+=o.spin*dt;o.rz+=o.spin*.6*dt;if(o.y<-6||o.z>14)o.dead=true}
 function stepParts(dt){for(const p of parts){p.t+=dt;p.vy-=(p.k==='coin'?14:16)*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=(p.vz+(state==='run'?speed*.5:0))*dt;p.r+=p.rv*dt}parts=parts.filter(p=>p.t<p.life)}
 function collide(o){
+  if(o.type==='coin'){o.dead=true;runCoins++;save.coins++;persist();SFX.coin();coinPop(o.x,0.7,o.z,1);return}
   if(o.type==='ice'){
-    const jumped=pg.y>0.25;o.hit=true;o.dead=true;
-    burst(o.x,0.45,o.z,14,[0.75,0.9,1],0.13,.85);SFX.crack();
-    if(jumped){runCoins+=3;save.coins+=3;persist();coinPop(o.x,o.h,o.z,3);SFX.coin();popText('+3 코인!');if(pg.vy<3)pg.vy=4.5}
-    else popText('앗, 점프해야 코인!');
+    // 공중에 떠 있음: 점프해서 몸이 닿아야 깨진다. 밑으로 지나가면 그냥 통과.
+    if(pg.y+A_.H<o.y||pg.y>o.y+o.h)return;
+    o.hit=true;o.dead=true;
+    burst(o.x,o.y+o.h/2,o.z,16,[0.75,0.9,1],0.15,.85);SFX.crack();
+    runCoins+=3;save.coins+=3;persist();coinPop(o.x,o.y,o.z,3);SFX.coin();popText('+3 코인!');
+    if(pg.vy<3)pg.vy=4.5;
     return;
   }
   if(pg.inv>0)return;
-  if(o.type!=='building'&&pg.y>o.h-0.08)return;   // jumped over
+  if(o.type==='arch'){if(pg.slide>0)return}         // 슬라이딩으로 통과
+  else if(o.type!=='building'&&pg.y>o.h-0.08)return;   // jumped over
   // hit
   const dir=o.x>pg.x+0.05?1:o.x<pg.x-0.05?-1:(Math.random()<.5?-1:1);
   o.hit=true;o.vx=dir*rnd(4,6);o.vy=6;o.vz=-1;o.spin=rnd(6,10);
   burst(pg.x,0.6,0,10,[1,1,1],0.1,1);shake=1;SFX.hit();try{navigator.vibrate&&navigator.vibrate(80)}catch(e){}
   if(pg.slip>0){gameOver();return}
   if(o.type==='building'){pg.lane=pg.lane===1?(Math.random()<.5?0:2):1;pg.queued=0}
+  if(o.type==='arch')pg.slide=0;
   pg.slip=5;pg.inv=1.1;pg.vy=Math.min(pg.vy,0);popText('미끄덩!');
 }
-function gameOver(){
-  pg.dead=true;state='over';pg.vy=4;SFX.over();
+function gameOver(fell){
+  pg.dead=true;state='over';pg.fell=!!fell;pg.vy=fell?-2:4;SFX.over();
   const nb=Math.floor(dist)>save.best;if(nb)save.best=Math.floor(dist);persist();
   setTimeout(()=>{if(state!=='over')return;
     document.getElementById('oDist').textContent=Math.floor(dist);document.getElementById('oBest').textContent=save.best;
@@ -599,6 +621,15 @@ function camera(){
   const VP=M4.mul(M4.persp(fov,asp,0.1,150),M4.look(eye,tg,[0,1,0]));
   return{VP,eye};
 }
+function roadSeg(a,b){const L=b-a;if(L<=0.02)return;
+  draw(PR.box,M4.mul(M4.T(0,-0.45,(a+b)/2),M4.S(ROAD_HALF*2,0.9,L)),{mode:2});
+  for(const s of[-1,1])draw(PR.bank,M4.chain(M4.T(s*ROAD_HALF,0,b),M4.Rx(-Math.PI/2),M4.S(0.26,L,0.2)),{col:[0.97,0.99,1,1]});}
+function drawRoad(){
+  const gaps=obs.filter(o=>o.type==='gap'&&!o.dead).sort((a,b)=>a.z-b.z);
+  let z0=-155;
+  for(const g of gaps){const gs=g.z-g.len/2,ge=g.z+g.len/2;if(gs>z0)roadSeg(z0,gs);z0=Math.max(z0,ge)}
+  if(z0<15)roadSeg(z0,15);
+}
 function render(){
   gl.viewport(0,0,W,H);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   const {VP,eye}=camera();
@@ -606,8 +637,7 @@ function render(){
   gl.disable(gl.BLEND);gl.depthMask(true);
   // sea, road, banks
   draw(PR.plane,M4.mul(M4.T(0,-0.5,-40),M4.S(420,1,420)),{mode:1});
-  draw(PR.box,M4.mul(M4.T(0,-0.45,-70),M4.S(ROAD_HALF*2,0.9,170)),{mode:2});
-  for(const s of[-1,1])draw(PR.bank,M4.chain(M4.T(s*ROAD_HALF,0,15),M4.Rx(-Math.PI/2),M4.S(0.26,170,0.2)),{col:[0.97,0.99,1,1]});
+  drawRoad();
   for(const b of bergs){
     if(b.floe)draw(PR.cyl,M4.chain(M4.T(b.x,-0.5,b.z),M4.Ry(b.r),M4.S(b.s,0.12,b.s*0.7)),{col:[0.93,0.97,1,1]});
     else draw(PR.sph,M4.chain(M4.T(b.x,-0.5,b.z),M4.Ry(b.r),M4.S(b.s,b.h,b.s*0.8)),{col:[0.93,0.97,1,1]});
@@ -618,7 +648,7 @@ function render(){
   const wad=(running&&pg.slip===0&&!pg.dead)?Math.sin(time*13)*0.13:Math.sin(time*2.2)*0.05;
   let ry=running?lerp(0,Math.PI,ease(pg.turn)):showRot;
   if(pg.slip>0)ry+=Math.sin(time*7)*0.25;
-  const lift=Math.sin(pg.tilt)*0.38,fwd=Math.sin(pg.tilt)*0.5;
+  const lift=Math.abs(Math.sin(pg.tilt))*0.38,fwd=Math.sin(pg.tilt)*0.5;
   const B=M4.chain(M4.T(running?pg.x:0,pg.y+bob+lift,running?fwd:0),M4.Ry(ry),M4.Rx(pg.tilt),M4.Rz(wad));
   const blink=pg.inv>0&&state==='run'&&Math.floor(time*14)%2===0;
   if(!blink)drawPenguin(B);
@@ -630,7 +660,9 @@ function render(){
   gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);
   const shy=0.012;
   const ps=1/(1+pg.y*0.9);draw(PR.plane,M4.chain(M4.T(running?pg.x:0,shy,running?fwd*0.5:0),M4.S(0.95*ps,1,0.8*ps)),{mode:4,col:[0,0,0,0.42]});
-  for(const o of obs)if(!o.hit&&(o.type==='mon'||o.type==='donut'))draw(PR.plane,M4.chain(M4.T(o.x,shy,o.z),M4.S(o.type==='donut'?0.8:1.0,1,0.6)),{mode:4,col:[0,0,0,0.32]});
+  for(const o of obs){if(o.hit)continue;
+    if(o.type==='mon'||o.type==='donut')draw(PR.plane,M4.chain(M4.T(o.x,shy,o.z),M4.S(o.type==='donut'?0.9:1.15,1,0.7)),{mode:4,col:[0,0,0,0.32]});
+    else if(o.type==='ice')draw(PR.plane,M4.chain(M4.T(o.x,shy,o.z),M4.S(0.62,1,0.44)),{mode:4,col:[0,0,0,0.20]});}
   const ices=obs.filter(o=>o.type==='ice').sort((a,b)=>a.z-b.z);
   gl.depthMask(true);
   for(const o of ices)drawObs(o);
@@ -645,8 +677,14 @@ function drawObs(o){
   else if(o.type==='donut'){const r=M.donut.h/2;const hop=Math.abs(Math.sin(o.roll*0.5))*0.1;
     const B=M4.chain(M4.T(o.x,o.y+r+hop,o.z),M4.Rx(o.rx),M4.Rz(-o.roll*0.35+o.rz),M4.T(0,-r,0));draw(M.donut.mesh,M4.mul(B,M.donut.nm))}
   else if(o.type==='building'){const B=M4.chain(M4.T(o.x,o.y,o.z),M4.Rz(o.rz*0.2));draw(M.building.mesh,M4.mul(B,M.building.nm))}
-  else if(o.type==='ice'){const B=M4.T(o.x,0,o.z);const gl2=0.05+0.04*Math.sin(time*4+o.ph);
+  else if(o.type==='ice'){const B=M4.chain(M4.T(o.x,o.y+Math.sin(time*2.2+o.ph)*0.08,o.z),M4.Ry(time*0.8+o.ph));
+    const gl2=0.07+0.05*Math.sin(time*4+o.ph);
     draw(M.ice.mesh,M4.mul(B,M.ice.nm),{col:[1,1,1,0.8],emis:[gl2,gl2*1.2,gl2*1.4]})}
+  else if(o.type==='coin'){draw(M.coin.mesh,M4.chain(M4.T(o.x,0.58+Math.sin(time*3+o.ph)*0.07,o.z),M4.Ry(time*2.6+o.ph),M.coin.nm),{emis:[0.14,0.10,0.02]})}
+  else if(o.type==='arch'){const W=ROAD_HALF,bt=0.42,wood={col:[0.46,0.30,0.18,1]},rope={col:[0.88,0.80,0.62,1]};
+    for(const s of[-1,1]){draw(PR.box,M4.chain(M4.T(s*(W-0.14),(ARCH_CLEAR+bt)/2,o.z),M4.S(0.3,ARCH_CLEAR+bt,0.3)),wood);
+      draw(PR.box,M4.chain(M4.T(s*(W-0.14),ARCH_CLEAR-0.1,o.z),M4.S(0.38,0.14,0.38)),rope)}
+    draw(PR.box,M4.chain(M4.T(0,ARCH_CLEAR+bt/2,o.z),M4.S(W*2,bt,0.34)),wood);}
 }
 
 /* ================= UI ================= */
