@@ -2,7 +2,8 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const js=fs.readFileSync('/Users/test/projects/penquin-run/index.html','utf8').split('<script>')[1].split('</script>')[0];
 
-const el=()=>new Proxy({style:{},classList:{add(){},remove(){},toggle(){}},dataset:{},
+const sty=()=>({setProperty(){},removeProperty(){},getPropertyValue:()=>''});
+const el=()=>new Proxy({style:sty(),classList:{add(){},remove(){},toggle(){}},dataset:{},
   addEventListener(){},setAttribute(){},textContent:'',innerHTML:'',offsetWidth:0},
   {get:(t,k)=>k in t?t[k]:(()=>{}),set:(t,k,v)=>(t[k]=v,true)});
 const ctx={console:{log:console.log,error(){}},setTimeout(){},clearTimeout(){},requestAnimationFrame(){},Math,Date,JSON,
@@ -14,7 +15,7 @@ const ctx={console:{log:console.log,error(){}},setTimeout(){},clearTimeout(){},r
   addEventListener(){},innerWidth:400,innerHeight:800};
 ctx.window.AudioContext=undefined; ctx.globalThis=ctx;
 // canvas.getContext -> null : 부팅이 'nogl'로 빠져 GL/모델 로딩을 건너뛴다
-ctx.document.getElementById=id=>id==='c'?{getContext:()=>null,addEventListener(){},style:{}}:el();
+ctx.document.getElementById=id=>id==='c'?{getContext:()=>null,addEventListener(){},style:sty()}:el();
 vm.createContext(ctx);
 vm.runInContext(js,ctx,{filename:'game.js'});
 
@@ -117,4 +118,63 @@ t('몬스터는 펭귄보다 크지만 점프 정점 안에 들어온다',()=>{
   }
 });
 
-console.log('\n'+pass+'개 통과');
+
+
+// --- 에너지: 하루 3판, 오전 9시 충전 ---
+t('첫 실행이면 3판이 채워진다',()=>{
+  run(`save.day=0;save.energy=0;refillCheck();`);
+  assert.strictEqual(run('save.energy'),3);
+});
+t('같은 날 다시 확인해도 충전되지 않는다',()=>{
+  run(`save.energy=1;refillCheck();`);
+  assert.strictEqual(run('save.energy'),1);
+});
+t('날짜가 바뀌면 다시 3판',()=>{
+  run(`save.energy=0;save.day=save.day-1;refillCheck();`);
+  assert.strictEqual(run('save.energy'),3);
+});
+t('달리기를 시작하면 1판 소모',()=>{
+  run(`save.energy=3;state='start';startRun();`);
+  assert.strictEqual(run('save.energy'),2);
+  assert.strictEqual(run('state'),'run');
+});
+t('0판이면 달리기가 시작되지 않는다',()=>{
+  run(`save.energy=0;state='start';startRun();`);
+  assert.strictEqual(run('state'),'start','상태 그대로');
+  assert.strictEqual(run('save.energy'),0,'음수로 안 내려감');
+});
+t('저장값이 망가져 있어도 범위 안으로 되돌린다',()=>{
+  for(const [bad,want] of [[999,3],[-5,0],[undefined,0],['x',0],[2,2]]){
+    run(`save.day=gameDay();save.energy=${JSON.stringify(bad)};refillCheck();`);
+    assert.strictEqual(run('save.energy'),want,`${bad} -> ${want}`);
+    run(`'\u25cf'.repeat(save.energy)+'\u25cb'.repeat(MAX_ENERGY-save.energy)`);  // repeat()이 터지지 않아야 함
+  }
+});
+t('하루 상한은 3판',()=>{
+  assert.strictEqual(run('MAX_ENERGY'),3);
+  assert.strictEqual(run('DAY_START_H'),9);
+});
+
+// --- 구간 테마: 500m마다 순환 ---
+t('거리에 따라 테마가 500m마다 바뀐다',()=>{
+  const names=JSON.parse(run('JSON.stringify(THEMES.map(t=>t.name))'));
+  for(const [d,want] of [[0,0],[499,0],[500,1],[1200,2],[1700,3],[2000,0]]){
+    const got=run(`Math.floor(${d}/THEME_EVERY)%THEMES.length`);
+    assert.strictEqual(got,want,`${d}m -> ${names[want]}`);
+  }
+});
+t('테마 전환은 섞이는 중에도 색이 범위를 벗어나지 않는다',()=>{
+  for(const b of [0,0.3,0.7,1]){
+    run(`themeFrom=0;themeIdx=2;themeBlend=${b};applyTheme();`);
+    for(const v of JSON.parse(run('JSON.stringify(curTint.concat(curSea,curFog))')))
+      assert.ok(v>=0&&v<=1.2,'색 성분 범위: '+v);
+  }
+});
+
+// --- 곡선은 보이기만 하고 주행 판정은 안 건드린다 ---
+t('곡률은 셰이더 전용 — 레인 좌표가 그대로다',()=>{
+  assert.strictEqual(JSON.stringify(run('JSON.stringify(LANES)')&&JSON.parse(run('JSON.stringify(LANES)'))),'[-1.5,0,1.5]');
+  assert.ok(run('BEND')>0,'곡률 값이 켜져 있음');
+});
+
+console.log('\n총 '+pass+'개 통과');
