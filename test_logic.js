@@ -8,7 +8,7 @@ const el=()=>new Proxy({style:sty(),classList:{add(){},remove(){},toggle(){}},da
   {get:(t,k)=>k in t?t[k]:(()=>{}),set:(t,k,v)=>(t[k]=v,true)});
 const ctx={console:{log:console.log,error(){}},setTimeout(){},clearTimeout(){},requestAnimationFrame(){},Math,Date,JSON,
   atob:s=>'',TextDecoder:class{decode(){return'{}'}},Blob:class{},Image:class{},URL:{createObjectURL(){},revokeObjectURL(){}},
-  localStorage:{getItem:()=>null,setItem(){}},navigator:{},
+  localStorage:{getItem:()=>null,setItem(){}},navigator:{},matchMedia:()=>({matches:false}),
   document:{getElementById:el,querySelector:el,querySelectorAll:()=>[],addEventListener(){},
     createElement:el,documentElement:el()},
   window:{addEventListener(){},devicePixelRatio:1,innerWidth:400,innerHeight:800},
@@ -175,6 +175,58 @@ t('테마 전환은 섞이는 중에도 색이 범위를 벗어나지 않는다'
 t('곡률은 셰이더 전용 — 레인 좌표가 그대로다',()=>{
   assert.strictEqual(JSON.stringify(run('JSON.stringify(LANES)')&&JSON.parse(run('JSON.stringify(LANES)'))),'[-1.5,0,1.5]');
   assert.ok(run('BEND')>0,'곡률 값이 켜져 있음');
+});
+
+// --- 미끄덩 중에는 피할 수 없는 장애물이 나오지 않는다 ---
+t('미끄덩 중엔 구멍·게이트가 안 나온다',()=>{
+  run(`M.building={d:1.6};M.ice={h:1.02,d:0.98};`);   // GL 없이 도는 테스트라 크기만 채워 둔다
+  const count=slip=>run(`(()=>{pg.slip=${slip};dist=1200;let g=0,a=0;
+    for(let i=0;i<3000;i++){obs=[];spawnRow(-100,false);
+      for(const o of obs){if(o.type==='gap')g++;if(o.type==='arch')a++}}
+    pg.slip=0;return g+','+a})()`).split(',').map(Number);
+  const [g0,a0]=count(0), [g1,a1]=count(3);
+  assert.ok(g0>0&&a0>0,'평소엔 나온다');
+  assert.strictEqual(g1,0,'미끄덩 중 구멍 없음');
+  assert.strictEqual(a1,0,'미끄덩 중 게이트 없음');
+});
+
+// --- 테마가 런 밖으로 새지 않는다 ---
+t('시작 화면으로 돌아가면 테마가 낮으로 리셋된다',()=>{
+  run(`themeFrom=2;themeIdx=2;themeBlend=1;applyTheme();goStart();`);
+  assert.strictEqual(run('themeIdx'),0);
+  assert.strictEqual(run('themeBlend'),1);
+  assert.deepStrictEqual(JSON.parse(run('JSON.stringify(curTint)')),[1,1,1],'틴트도 낮');
+});
+
+// --- 느린 기기(dt 상한 0.05)에서 장애물이 그냥 지나가지 않는다 ---
+t('20fps·최고속도에서도 슬라이딩 게이트를 놓치지 않는다',()=>{
+  run(`M.building={d:1.6};M.ice={h:1.02,d:0.98};`);
+  const miss=(type,extra='')=>run(`(()=>{let miss=0;
+    for(let off=0;off<1;off+=0.02){
+      obs=[];state='run';introT=1;dist=1200;speed=24;spawnAcc=-1e9;
+      Object.assign(pg,{lane:1,x:0,y:0,vy:0,slip:0,inv:0,slide:0,dead:false,fell:false});
+      const o=makeObs('${type}',1,-12-off${extra});let got=false;
+      for(let i=0;i<20;i++){update(0.05);if(o.hit){got=true;break}}
+      if(!got)miss++;
+    }return miss})()`);
+  assert.strictEqual(miss('arch'),0,'게이트');
+  assert.strictEqual(miss('mon',',0'),0,'몬스터');
+});
+
+// --- HUD 캐시 키가 거리/코인을 섞지 않는다 ---
+t('거리 1·코인 23과 거리 12·코인 3을 구분한다',()=>{
+  run(`lastHud='';dist=1;save.coins=23;pg.slip=0;hud();`);
+  const a=run('lastHud');
+  run(`dist=12;save.coins=3;hud();`);
+  assert.notStrictEqual(run('lastHud'),a,'키가 충돌하면 HUD가 안 바뀐다');
+});
+
+// --- 일시정지면 세상이 멈춘다 ---
+t('일시정지 중에는 바다·빙산이 움직이지 않는다',()=>{
+  run(`state='pause';initBergs();`);
+  const before=run('JSON.stringify([scroll,time,bergs[0].z])');
+  run(`for(let i=0;i<30;i++)update(0.016);`);
+  assert.strictEqual(run('JSON.stringify([scroll,time,bergs[0].z])'),before);
 });
 
 console.log('\n총 '+pass+'개 통과');
